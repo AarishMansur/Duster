@@ -1,6 +1,0 @@
-# Companies to fetch jobs from — one per line, format: source:company
-# Supported sources: greenhouse, lever, ashby
-# Edit this list to track the companies you care about.
-greenhouse:stripe
-greenhouse:airbnb
-lever:fly
