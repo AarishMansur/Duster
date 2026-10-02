@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Five Good Ones{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="card">
+  <p>
+    <strong>{{ total }}</strong> jobs tracked,
+    <strong>{{ unjudged }}</strong> waiting to be judged by the
+    <strong>{{ classifier }}</strong> classifier.
+  </p>
+  <button hx-post="/api/classify" hx-target="#classify-result" hx-swap="innerHTML">
+    Classify new jobs
+  </button>
+  <span id="classify-result"></span>
+</div>
+{% endblock %}
