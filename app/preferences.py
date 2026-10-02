@@ -1,8 +1,10 @@
 import json
+import re
 from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
+from .config import settings
 from .db import engine
 from .models import Preference
 
@@ -46,3 +48,14 @@ def add_feedback(job_id: int, action: str) -> None:
         {"job_id": job_id, "action": action, "ts": datetime.now(timezone.utc).isoformat()}
     )
     set_pref("feedback", json.dumps(feedback))
+
+
+def get_classifier_name() -> str:
+    return get_prefs().get("classifier") or settings.classifier
+
+
+def extract_excludes_from_memories(memories: list[str]) -> list[str]:
+    keywords = []
+    for m in memories:
+        keywords.extend(re.findall(r"exclude keyword '([^']+)'", m))
+    return keywords
