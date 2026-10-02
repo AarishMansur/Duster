@@ -1,0 +1,6 @@
+{% if budget_reached %}
+<span class="budget-reached">Budget reached — come back next week ({{ used }}/{{ budget }})</span>
+{% elif applied %}
+<span class="applied-tag">Applied ✓ ({{ used }}/{{ budget }} this week)</span>
+<a href="{{ job_url }}" target="_blank" class="btn secondary">View listing</a>
+{% endif %}

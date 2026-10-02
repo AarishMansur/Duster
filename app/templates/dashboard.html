@@ -3,15 +3,27 @@
 {% block content %}
 <h1>Dashboard</h1>
 
-<div class="card">
-  <p>
-    <strong>{{ total }}</strong> jobs tracked,
-    <strong>{{ unjudged }}</strong> waiting to be judged by the
-    <strong>{{ classifier }}</strong> classifier.
-  </p>
-  <button hx-post="/api/classify" hx-target="#classify-result" hx-swap="innerHTML">
-    Classify new jobs
+<div class="tabs">
+  <button class="tab" onclick="setTab(this)" hx-get="/tab/new" hx-target="#tab-content" hx-swap="innerHTML">
+    New <span class="badge">{{ counts.new }}</span>
   </button>
-  <span id="classify-result"></span>
+  <button class="tab" onclick="setTab(this)" hx-get="/tab/fit" hx-target="#tab-content" hx-swap="innerHTML">
+    For You <span class="badge">{{ counts.fit }}</span>
+  </button>
+  <button class="tab" onclick="setTab(this)" hx-get="/tab/skipped" hx-target="#tab-content" hx-swap="innerHTML">
+    Skipped <span class="badge">{{ counts.skipped }}</span>
+  </button>
+  <button class="tab" onclick="setTab(this)" hx-get="/tab/applied" hx-target="#tab-content" hx-swap="innerHTML">
+    Applied <span class="badge">{{ counts.applied_week }}</span>
+  </button>
 </div>
+
+<div id="tab-content" hx-get="/tab/{{ default_tab }}" hx-trigger="load" hx-swap="innerHTML"></div>
+
+<script>
+function setTab(btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+}
+</script>
 {% endblock %}
