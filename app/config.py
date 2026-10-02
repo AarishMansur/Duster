@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./fivegoodones.db"
     companies_file: str = "config/companies.txt"
 
+    classifier: str = "heuristic"
     ollama_base_url: str = "http://localhost:11434"
 
     backboard_api_key: str = ""
