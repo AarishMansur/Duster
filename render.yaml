@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: five-good-ones
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:///./data/fivegoodones.db
+      - key: CLASSIFIER
+        value: heuristic
+      - key: BACKBOARD_API_KEY
+        sync: false
+
+  - type: cron
+    name: five-good-ones-fetch
+    runtime: python
+    plan: free
+    schedule: "0 9 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.fetch
