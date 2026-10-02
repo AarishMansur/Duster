@@ -16,7 +16,12 @@ templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/", response_class=HTMLResponse)
-def home(request: Request, db: Session = Depends(get_session)):
+def home(request: Request):
+    return templates.TemplateResponse(request, "landing.html", {})
+
+
+@router.get("/patterns", response_class=HTMLResponse)
+def patterns(request: Request, db: Session = Depends(get_session)):
     return templates.TemplateResponse(
         request,
         "home.html",

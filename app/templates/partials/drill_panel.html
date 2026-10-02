@@ -38,8 +38,8 @@
   {% elif done %}
     <section class="card">
       <h2>Set complete</h2>
-      <p>Five answers are saved. The streak on the home page includes today.</p>
-      <p><a class="button" href="/">Back to patterns</a></p>
+      <p>Five answers are saved. The streak on the patterns page includes today.</p>
+      <p><a class="button" href="/patterns">Back to patterns</a></p>
     </section>
   {% else %}
     <form class="card" method="post" action="/drill/start" hx-post="/drill/start" hx-target="#drill-panel" hx-swap="outerHTML">

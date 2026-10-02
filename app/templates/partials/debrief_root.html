@@ -29,7 +29,7 @@
           <p class="muted">No weakness tags on this one.</p>
         {% endif %}
       {% endfor %}
-      <p><a href="/">See it on your patterns</a></p>
+      <p><a href="/patterns">See it on your patterns</a></p>
     </section>
   {% else %}
     <form id="voice-form" class="card" hx-post="/debrief/transcribe" hx-target="#dump-slot" hx-swap="innerHTML" hx-encoding="multipart/form-data">
