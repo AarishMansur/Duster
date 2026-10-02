@@ -1,210 +1,57 @@
-from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
+"""Home page: weakness patterns, sessions, streak, Backboard memory."""
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Form, Request
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlmodel import Session, and_, or_, select
+from sqlmodel import Session
 
-from .. import backboard
-from ..classifiers import get_classifier
-from ..db import engine
-from ..models import Application, Job, Verdict
-from ..preferences import add_feedback, get_budget, get_classifier_name, get_prefs
+from ..config import settings
+from ..db import get_session
+from ..memory import read_thread_summary
+from ..patterns import drill_streak, pattern_rows, session_cards
+from ..preferences import get_prefs, set_pref
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
+templates = Jinja2Templates(directory="app/templates")
 
 
-def _week_start() -> date:
-    today = datetime.now(timezone.utc).date()
-    return today - timedelta(days=today.weekday())
-
-
-def _recent_clause(cutoff: datetime):
-    return or_(
-        Job.posted_at >= cutoff,
-        and_(Job.posted_at.is_(None), Job.fetched_at >= cutoff),
-    )
-
-
-def _counts(session: Session) -> dict[str, int]:
-    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-    unjudged = Job.id.not_in(select(Verdict.job_id))
-    return {
-        "new": len(session.exec(select(Job).where(unjudged, _recent_clause(cutoff))).all()),
-        "fit": len(session.exec(select(Verdict).where(Verdict.label == "fit")).all()),
-        "skipped": len(session.exec(select(Verdict).where(Verdict.label == "no_fit")).all()),
-        "applied_week": len(
-            session.exec(select(Application).where(Application.week_start == _week_start())).all()
-        ),
-    }
-
-
-@router.get("/")
-def dashboard(request: Request):
-    with Session(engine) as session:
-        counts = _counts(session)
+@router.get("/", response_class=HTMLResponse)
+def home(request: Request, db: Session = Depends(get_session)):
     return templates.TemplateResponse(
         request,
-        "dashboard.html",
-        {"counts": counts, "default_tab": "new" if counts["new"] else "fit"},
+        "home.html",
+        {
+            "patterns": pattern_rows(db),
+            "sessions": session_cards(db),
+            "streak": drill_streak(db),
+            "memory": read_thread_summary(),
+            "analyzer": settings.analyzer,
+            "prefs": get_prefs(),
+        },
     )
 
 
-@router.get("/tab/new")
-def tab_new(request: Request):
-    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-    with Session(engine) as session:
-        jobs = session.exec(
-            select(Job)
-            .where(Job.id.not_in(select(Verdict.job_id)), _recent_clause(cutoff))
-            .order_by(Job.fetched_at.desc())
-        ).all()
-    return templates.TemplateResponse(
-        request, "partials/new.html",
-        {"jobs": jobs, "classifier_name": get_classifier(get_classifier_name()).name},
-    )
-
-
-@router.get("/tab/fit")
-def tab_fit(request: Request):
-    with Session(engine) as session:
-        rows = session.exec(
-            select(Verdict, Job)
-            .where(Verdict.job_id == Job.id, Verdict.label == "fit")
-            .order_by(Verdict.confidence.desc())
-        ).all()
-        applied_ids = set(session.exec(select(Application.job_id)).all())
-        used = len(
-            session.exec(select(Application).where(Application.week_start == _week_start())).all()
-        )
+@router.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request):
     return templates.TemplateResponse(
         request,
-        "partials/fit.html",
-        {"rows": rows, "applied_ids": applied_ids, "used": used, "budget": get_budget()},
+        "settings.html",
+        {"prefs": get_prefs(), "saved": False, "analyzer": settings.analyzer},
     )
 
 
-@router.get("/tab/skipped")
-def tab_skipped(request: Request):
-    with Session(engine) as session:
-        rows = session.exec(
-            select(Verdict, Job)
-            .where(Verdict.job_id == Job.id, Verdict.label == "no_fit")
-            .order_by(Verdict.created_at.desc())
-        ).all()
-    return templates.TemplateResponse(request, "partials/skipped.html", {"rows": rows})
-
-
-@router.get("/tab/applied")
-def tab_applied(request: Request):
-    with Session(engine) as session:
-        rows = session.exec(
-            select(Application, Job)
-            .where(Application.job_id == Job.id)
-            .order_by(Application.week_start.desc(), Application.created_at.desc())
-        ).all()
-    weeks: dict[str, list] = {}
-    for app, job in rows:
-        weeks.setdefault(app.week_start.isoformat(), []).append((app, job))
-    return templates.TemplateResponse(request, "partials/applied.html", {"weeks": weeks})
-
-
-@router.post("/api/classify")
-def classify_unjudged():
-    classifier = get_classifier(get_classifier_name())
-    with Session(engine) as session:
-        unjudged = session.exec(
-            select(Job).where(Job.id.not_in(select(Verdict.job_id)))
-        ).all()
-        for job in unjudged:
-            session.add(classifier.classify(job, get_prefs()))
-        session.commit()
-    return {"classified": len(unjudged), "classifier": classifier.name}
-
-
-@router.post("/apply/{job_id}")
-def apply(request: Request, job_id: int):
-    week_start = _week_start()
-    with Session(engine) as session:
-        job = session.get(Job, job_id)
-        if job is None:
-            raise HTTPException(404, "job not found")
-        used = len(
-            session.exec(select(Application).where(Application.week_start == week_start)).all()
-        )
-        budget = get_budget()
-        if used >= budget:
-            return templates.TemplateResponse(
-                request,
-                "partials/apply_result.html",
-                {"budget_reached": True, "used": used, "budget": budget},
-            )
-        session.add(Application(job_id=job_id, week_start=week_start))
-        session.commit()
-        job_url = job.url
+@router.post("/settings", response_class=HTMLResponse)
+def save_settings(
+    request: Request,
+    target_role: str = Form(""),
+    domain: str = Form(""),
+    weak_areas: str = Form(""),
+):
+    set_pref("target_role", target_role.strip() or "backend engineer")
+    set_pref("domain", domain.strip())
+    set_pref("weak_areas", weak_areas.strip())
     return templates.TemplateResponse(
         request,
-        "partials/apply_result.html",
-        {"job_url": job_url, "applied": True, "used": used + 1, "budget": budget},
+        "settings.html",
+        {"prefs": get_prefs(), "saved": True, "analyzer": settings.analyzer},
     )
-
-
-@router.post("/hide/{job_id}")
-def hide(job_id: int):
-    with Session(engine) as session:
-        job = session.get(Job, job_id)
-        verdict = session.exec(select(Verdict).where(Verdict.job_id == job_id)).first()
-        old_reason = "no prior verdict"
-        if verdict is None:
-            verdict = Verdict(
-                job_id=job_id,
-                model_name="user",
-                label="no_fit",
-                confidence=1.0,
-                reason="Hidden by user",
-            )
-            session.add(verdict)
-        else:
-            old_reason = verdict.reason
-            verdict.label = "no_fit"
-            verdict.confidence = 1.0
-            verdict.reason = "Hidden by user"
-            verdict.model_name = "user"
-        session.commit()
-        job_title, company = job.title, job.company
-    add_feedback(job_id, "hide")
-    backboard.add_memory(
-        f"User hid job {job_id} ({job_title} at {company}). Reason: {old_reason}"
-    )
-    return Response(content="")
-
-
-@router.post("/override/{job_id}")
-def override(job_id: int):
-    with Session(engine) as session:
-        job = session.get(Job, job_id)
-        verdict = session.exec(select(Verdict).where(Verdict.job_id == job_id)).first()
-        old_reason = "no prior verdict"
-        if verdict is None:
-            verdict = Verdict(
-                job_id=job_id,
-                model_name="user",
-                label="fit",
-                confidence=1.0,
-                reason="Overridden by user",
-            )
-            session.add(verdict)
-        else:
-            old_reason = verdict.reason
-            verdict.label = "fit"
-            verdict.confidence = 1.0
-            verdict.reason = "Overridden by user"
-            verdict.model_name = "user"
-        session.commit()
-        job_title, company = job.title, job.company
-    add_feedback(job_id, "override")
-    backboard.add_memory(
-        f"User overrode job {job_id} ({job_title} at {company}) to fit. Previous reason: {old_reason}"
-    )
-    return Response(content="")
