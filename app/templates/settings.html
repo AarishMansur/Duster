@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Settings — Five Good Ones{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+
+{% if saved %}
+<div class="banner">Saved. Your preferences are stored on this server.</div>
+{% endif %}
+
+<form method="post" action="/settings">
+  <div class="card">
+    <div class="field">
+      <label for="resume">Resume <span class="hint">paste the text, no file uploads</span></label>
+      <textarea id="resume" name="resume_text" rows="10" placeholder="Paste your resume text here...">{{ prefs.resume_text }}</textarea>
+    </div>
+
+    <div class="field">
+      <label for="domain">Target domain <span class="hint">what you want — and what you don't</span></label>
+      <textarea id="domain" name="domain_definition" rows="4" placeholder="e.g. ML engineer, NOT data analyst, NOT generic backend">{{ prefs.domain_definition }}</textarea>
+    </div>
+
+    <div class="field">
+      <label for="budget">Weekly application budget</label>
+      <input type="number" id="budget" name="weekly_budget" min="0" max="50" value="{{ prefs.weekly_budget }}">
+    </div>
+
+    <div class="field">
+      <label for="exclude">Exclude keywords <span class="hint">comma-separated; jobs matching these are auto-rejected</span></label>
+      <textarea id="exclude" name="exclude_keywords" rows="3" placeholder="e.g. fintech, on-site, sales">{{ prefs.exclude_keywords }}</textarea>
+    </div>
+  </div>
+
+  <button type="submit">Save settings</button>
+
+  <p class="privacy-note">
+    Your resume and preferences never leave this server. The only outbound call is to your
+    own classifier (Ollama on this machine, or Backboard's open-weight models) when judging jobs.
+  </p>
+</form>
+{% endblock %}
