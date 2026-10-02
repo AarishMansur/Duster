@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 from sqlmodel import Session, select
@@ -37,3 +38,11 @@ def get_budget() -> int:
         return max(0, int(get_prefs()["weekly_budget"]))
     except ValueError:
         return 5
+
+
+def add_feedback(job_id: int, action: str) -> None:
+    feedback = json.loads(get_prefs().get("feedback") or "[]")
+    feedback.append(
+        {"job_id": job_id, "action": action, "ts": datetime.now(timezone.utc).isoformat()}
+    )
+    set_pref("feedback", json.dumps(feedback))
