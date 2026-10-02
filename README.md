@@ -1,177 +1,137 @@
-# Five Good Ones
+# Duster
 
-A job-fit filter for job hunters who are tired of mass-applying to the wrong roles.
+An interview post-mortem coach for one person.
 
-Five Good Ones pulls job postings from public applicant-tracking APIs (Greenhouse, Lever, Ashby), classifies each one against **your** target domain with an open-weight model, and enforces a weekly application budget — so you only ever apply to high-fit roles, at a sustainable pace.
+She does the interview, gets rejected or ghosted, and never learns why. Rejections never come with feedback. Duster turns the interview the way she remembers it — a messy `Q:` / `A:` dump, or a voice note — into the weakness that keeps showing up, then gives her a drill aimed at that weakness.
 
-**No closed AI APIs anywhere.** Every LLM call goes through Ollama (local) or Backboard (open-weight models). The app ships with a heuristic keyword classifier so it works with zero model setup.
+Open-source models only. Nothing in this repo calls OpenAI or Anthropic. Every model call goes through Ollama on her machine, Backboard's open-weight models, or a Tinker fine-tune. With no keys set, the heuristic analyzer still tags answers.
 
-## Who it's for
+## What it does
 
-A job seeker who wants a tight, curated list — "these 5 roles this week are worth your time" — instead of a firehose of 800 postings.
+- **Debrief.** Company, role, outcome, and a dump of what they asked and what she said. Optional `.m4a` / `.mp3` voice note, transcribed locally with faster-whisper and deleted. The audio never leaves the machine.
+- **Patterns.** Weakness tags counted across interviews (`no_metrics — 7x in 4 sessions`), with an arrow for whether that tag is showing up more or less lately. Outcome badges. A drill streak.
+- **Drills.** Five practice questions for her target role. She answers, gets the tags, concrete feedback, and a rewritten strong version of *her* answer. Focus mode biases the questions toward her top two tags.
+- **Memory.** Each drill is appended to one Backboard assistant thread, and the home page reads that thread back.
+- **Comparison and fine-tune.** The same ten answers can be run through three open models on Backboard. A LoRA fine-tune of Qwen2.5-7B-Instruct can be trained on `data/train.jsonl` and scored against the heuristic and the base model.
 
-## How it works
-
-```
- config/companies.txt          public job boards           open-weight models
- (source:company list)    ->   Greenhouse/Lever/Ashby  ->   classify fit vs no-fit
-        |                            |                            |
-        v                            v                            v
-   python -m app.fetch        SQLite (Job table)          Verdict (label, confidence, reason)
-        |                            |                            |
-        v                            v                            v
-   daily cron / manual      Dashboard (htmx tabs)        For You / Skipped / Applied
-```
-
-### Architecture
+## Architecture
 
 ```
-                         +---------------------------+
-                         |  config/companies.txt     |
-                         +-------------+-------------+
-                                       |
-                                       v
-+----------------+   GET/POST   +-------+--------+   normalize   +-----------+
-| Greenhouse API |------------>|                |-------------->|           |
-+----------------+             |  app/fetcher  |               |  SQLite   |
-+----------------+             |  (async httpx)|               |  (SQLModel)|
-| Lever API      |------------>|                |               |           |
-+----------------+             +-------+--------+               +-----+-----+
-+----------------+                     |                              |
-| Ashby API      |------------>        |                              v
-+----------------+                     v                        +-----------+
-                              +----------------+               | Dashboard |
-                              | app/classifiers|               |  (htmx)   |
-                              |  - heuristic   |               +-----+-----+
-                              |  - ollama      |                     |
-                              |  - backboard   |                     v
-                              |  - tinker     |               +-----------+
-                              +-------+--------+               | Settings  |
-                                      |                        +-----------+
-                              +-------v--------+
-                              | Ollama / Backboard / Tinker |
-                              +------------------------------+
+  voice note (.m4a/.mp3)                typed dump
+           |                                |
+           v                                v
+   faster-whisper (local CPU) ----->  parse Q: / A:
+   file deleted after                      |
+                                           v
+                                    +--------------+
+                                    |   SQLite     |
+                                    | session, qa  |
+                                    | weakness_tag |
+                                    | drill        |
+                                    +------+-------+
+                                           |
+                                           v
+                              get_analyzer()  ANALYZER=
+                              +--------+--------+--------+
+                              |        |        |        |
+                         heuristic  ollama  backboard  tinker
+                         (rules)   qwen2.5   open      LoRA
+                                   local     weights   Qwen
+                                           |
+                                           v
+                              home: counts, arrows, streak
+                              drill: 5 questions, score, rewrite
+                                           |
+                                           v
+                              one Backboard assistant thread
+                              (drill history, read back on the home page)
 ```
 
 ## Setup
 
-### 1. Install
+Python 3.11.
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # macOS / Linux
 pip install -r requirements.txt
-cp .env.example .env             # then edit .env
-```
-
-### 2. (Optional) Pull the local model
-
-The app works out of the box with the heuristic classifier. To use a local LLM:
-
-```bash
-ollama pull qwen2.5:7b
-```
-
-### 3. Configure companies
-
-Edit `config/companies.txt` — one `source:company` per line:
-
-```
-greenhouse:stripe
-lever:fly
-ashby:mercury
-```
-
-### 4. Run
-
-```bash
+copy .env.example .env          # then edit .env
+python -m app.seed
 uvicorn app.main:app --reload
 ```
 
-Open http://localhost:8000 — set your resume, domain, budget, and exclude keywords on `/settings`, then hit **Classify new jobs** on the dashboard.
+Open http://127.0.0.1:8000. The seed loads two interviews (Northwind rejected, Lumen Health ghosted) so the pattern page is not empty.
 
-### 5. Fetch jobs
+### Analyzers
+
+| `ANALYZER` | What runs |
+| --- | --- |
+| `heuristic` | Length, digits, filler density, structure words. No network. Default. |
+| `ollama` | Local `qwen2.5:7b`. `ollama pull qwen2.5:7b` first. |
+| `backboard` | Open-weight model via `https://app.backboard.io/api` and `X-API-Key`. Provider is `openrouter`. A closed provider is refused. |
+| `tinker` | Fine-tuned sampler from `TINKER_MODEL_NAME`. Falls back to the heuristic if the key or the model path is missing. |
+
+Every model response is checked with Pydantic. If the JSON is missing or invalid, that call uses the heuristic and the page says so. A model failure does not crash the request.
+
+### Voice notes
+
+The first transcription downloads the whisper model (default `base`) onto this machine. ffmpeg has to be on the PATH for `.m4a`. The Docker image installs it. The temp file is removed when transcription finishes.
+
+### Backboard model comparison
 
 ```bash
-python -m app.fetch        # manual fetch
-python -m app.seed         # 10 fake jobs for dev testing
+python -m app.compare_models
 ```
 
-## Classifiers
+Runs the 10 answers in `app/sample_qa.py` through `llama-3.1-8b-instruct`, `qwen2.5-7b-instruct`, and `mistral-7b-instruct` (mapped to OpenRouter slugs) and writes `compare_results.json` with per-model tags, latency, cost, and pairwise tag agreement.
 
-All classifiers implement one interface — `classify(job, prefs) -> Verdict` — and every LLM response is validated with pydantic before use. On any parse failure, the app falls back to the heuristic classifier. It never crashes.
-
-| Classifier | Backend | Needs | Use case |
-|---|---|---|---|
-| `heuristic` | keyword matching | nothing | zero-setup baseline, fallback |
-| `ollama` | qwen2.5:7b via Ollama | local Ollama | private, free, offline |
-| `backboard` | open-weight models via Backboard API | `BACKBOARD_API_KEY` | no local GPU |
-| `tinker` | LoRA fine-tune via Tinker API | `TINKER_API_KEY`, trained model | best accuracy (see below) |
-
-Switch in Settings or via `CLASSIFIER` in `.env`.
-
-## Fine-tuning with Tinker (optional)
-
-The app records every Hide/Override you make as labeled feedback. Use it to fine-tune a classifier on your own taste:
+### Tinker fine-tune
 
 ```bash
 pip install -r requirements-train.txt
-# 1. Label data into data/train.jsonl (format below)
-python scripts/train_tinker.py
-# 2. Evaluate against the baselines
-python scripts/eval_classifiers.py
+python data/make_jsonl.py          # refreshes data/train.jsonl and data/test.jsonl
+python scripts/train_tinker.py     # LoRA on Qwen/Qwen2.5-7B-Instruct, writes TINKER_MODEL_NAME
+python scripts/eval_analyzers.py   # heuristic vs ollama vs tinker -> eval_results.json
 ```
 
-`data/train.jsonl` format — one conversation per line:
+The training script asks for `Qwen/Qwen2.5-7B-Instruct`. As of this writing Tinker rejects that base model (`400 not supported`) and the script continues on `Qwen/Qwen3-8B`, the closest supported open instruct model, with the same prompt and the same jsonl.
 
-```json
-{"messages": [{"role": "user", "content": "Job title: Senior ML Engineer\nJob description:\nBuild and deploy production ML models...\nTarget domain: ML engineer, NOT data analyst"}, {"role": "assistant", "content": "{\"label\": \"fit\"}"}]}
+`eval_results.json` is tag-level precision, recall, and the false-negative rate on `no_metrics`. If Ollama or Tinker is not configured, that row is the heuristic fallback and the file says so. Do not treat a fallback row as a fine-tune result.
+
+Held-out run after the Qwen3-8B LoRA (10 examples, 0 Tinker fallbacks):
+
+| analyzer | precision | recall | no_metrics false-negative rate |
+| --- | --- | --- | --- |
+| heuristic | 0.35 | 0.50 | 0.50 |
+| ollama qwen2.5:7b | 0.35 | 0.50 | 0.50 (fallback on all 10; Ollama was not running) |
+| tinker LoRA | 0.50 | 0.429 | 0.50 |
+
+The fine-tune cut false tags (13 → 6) and raised precision. Recall dipped (7 → 8 false negatives), and it still missed half of the `no_metrics` answers. Training loss fell from 10.23 to 0.00 over 100 steps on 18 conversations, so the weights fit that small set tightly.
+
+The training target is the same strict JSON the app asks for at inference time, including evidence quotes copied from her answer. A few labels disagree with the keyword rules on purpose: "2 years of experience" contains a digit and is still `no_metrics`, because it is not an outcome.
+
+## Deploy
+
+`render.yaml` is an always-on web service (`plan: starter`) running `uvicorn app.main:app`. Set `BACKBOARD_API_KEY` in the Render dashboard. The committed default analyzer is `heuristic`, so the site works before any key is added.
+
+```bash
+docker build -t duster .
+docker run --env-file .env -p 8000:8000 duster
 ```
 
-`train_tinker.py` LoRA-fine-tunes Qwen2.5-7B-Instruct on this data and writes the resulting model name to `.env` as `TINKER_MODEL_NAME`. `eval_classifiers.py` runs the held-out `data/test.jsonl` through heuristic, ollama (zero-shot), and tinker (fine-tuned), printing accuracy + false-positive rate for each and saving `eval_results.json`.
+SQLite on Render's disk is fine for one person. It does not survive a redeploy that replaces the disk. For a demo, re-run is not required; seed from the shell if the disk is empty.
 
-## Configuration
+## Tags
 
-All config lives in `.env` (see `.env.example`):
+`rambling`, `no_metrics`, `no_structure`, `weak_closing`, `too_short`, `off_topic`, `unclear`. Severity is `low`, `med`, or `high`.
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `DATABASE_URL` | `sqlite:///./fivegoodones.db` | SQLModel connection (Postgres-ready) |
-| `COMPANIES_FILE` | `config/companies.txt` | boards to fetch |
-| `CLASSIFIER` | `heuristic` | default classifier |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | local Ollama |
-| `BACKBOARD_API_KEY` | — | Backboard API key |
-| `BACKBOARD_BASE_URL` | `https://app.backboard.io/api` | Backboard endpoint |
-| `BACKBOARD_MODEL` | `llama-3.1-8b-instruct` | model for Backboard classifier |
-| `COMPARE_MODELS` | 3 open models | models for `app.compare_models` |
-| `TINKER_API_KEY` | — | Tinker API key |
-| `TINKER_MODEL_NAME` | — | saved LoRA weights (`tinker://...`) |
+## Tests
 
-## Scripts
+```bash
+python -m unittest tests.test_core
+```
 
-| Command | What it does |
-|---|---|
-| `python -m app.fetch` | fetch + normalize jobs from all boards |
-| `python -m app.seed` | insert 10 fake jobs for dev |
-| `python -m app.compare_models` | 20 jobs x 3 models via Backboard -> `compare_results.json` |
-| `python scripts/train_tinker.py` | LoRA fine-tune on `data/train.jsonl` |
-| `python scripts/eval_classifiers.py` | 3-way classifier eval -> `eval_results.json` |
+## License
 
-## Deploy (Render)
-
-`render.yaml` defines two services:
-
-- **web** — `uvicorn app.main:app`
-- **cron** — `python -m app.fetch` daily at 09:00
-
-Push to GitHub, import the repo in Render, and the blueprint deploys both. A `Dockerfile` is included if you prefer container deploys.
-
-> Note: Render's free tier has an ephemeral filesystem, so SQLite resets on redeploy. Set `DATABASE_URL` to a Postgres instance when you're ready (SQLModel works unchanged).
-
-## Privacy
-
-Your resume and preferences never leave this server. The only outbound calls are to your own classifier (Ollama on this machine, or Backboard's open-weight models) when judging jobs. Hide/Override feedback is stored locally in the `Preference` table and optionally mirrored to Backboard memory.
-
-## Tech stack
-
-Python 3.11 · FastAPI · SQLModel/SQLite · Jinja2 + htmx · httpx · pydantic-settings · Ollama · Backboard · Tinker
+MIT. See `LICENSE`.
