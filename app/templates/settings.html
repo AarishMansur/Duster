@@ -7,6 +7,10 @@
 <div class="banner">Saved. Your preferences are stored on this server.</div>
 {% endif %}
 
+{% if imported_excludes %}
+<div class="banner">Imported {{ imported_excludes|length }} exclude keyword{{ 's' if imported_excludes|length != 1 else '' }} from your feedback memory: {{ imported_excludes|join(', ') }}</div>
+{% endif %}
+
 <form method="post" action="/settings">
   <div class="card">
     <div class="field">
@@ -27,6 +31,16 @@
     <div class="field">
       <label for="exclude">Exclude keywords <span class="hint">comma-separated; jobs matching these are auto-rejected</span></label>
       <textarea id="exclude" name="exclude_keywords" rows="3" placeholder="e.g. fintech, on-site, sales">{{ prefs.exclude_keywords }}</textarea>
+    </div>
+
+    <div class="field">
+      <label for="classifier">Classifier</label>
+      <select id="classifier" name="classifier">
+        <option value="heuristic" {% if effective_classifier == "heuristic" %}selected{% endif %}>Heuristic — keyword matching, no model needed</option>
+        <option value="ollama" {% if effective_classifier == "ollama" %}selected{% endif %}>Ollama — local qwen2.5:7b</option>
+        <option value="backboard" {% if effective_classifier == "backboard" %}selected{% endif %}>Backboard — cloud open-weight models</option>
+        <option value="tinker" {% if effective_classifier == "tinker" %}selected{% endif %}>Tinker — fine-tuned LoRA (best accuracy)</option>
+      </select>
     </div>
   </div>
 

@@ -5,11 +5,11 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, and_, or_, select
 
+from .. import backboard
 from ..classifiers import get_classifier
-from ..config import settings
 from ..db import engine
 from ..models import Application, Job, Verdict
-from ..preferences import add_feedback, get_budget, get_prefs
+from ..preferences import add_feedback, get_budget, get_classifier_name, get_prefs
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -62,7 +62,7 @@ def tab_new(request: Request):
         ).all()
     return templates.TemplateResponse(
         request, "partials/new.html",
-        {"jobs": jobs, "classifier_name": get_classifier(settings.classifier).name},
+        {"jobs": jobs, "classifier_name": get_classifier(get_classifier_name()).name},
     )
 
 
@@ -112,7 +112,7 @@ def tab_applied(request: Request):
 
 @router.post("/api/classify")
 def classify_unjudged():
-    classifier = get_classifier(settings.classifier)
+    classifier = get_classifier(get_classifier_name())
     with Session(engine) as session:
         unjudged = session.exec(
             select(Job).where(Job.id.not_in(select(Verdict.job_id)))
@@ -153,46 +153,58 @@ def apply(request: Request, job_id: int):
 @router.post("/hide/{job_id}")
 def hide(job_id: int):
     with Session(engine) as session:
+        job = session.get(Job, job_id)
         verdict = session.exec(select(Verdict).where(Verdict.job_id == job_id)).first()
+        old_reason = "no prior verdict"
         if verdict is None:
-            session.add(
-                Verdict(
-                    job_id=job_id,
-                    model_name="user",
-                    label="no_fit",
-                    confidence=1.0,
-                    reason="Hidden by user",
-                )
+            verdict = Verdict(
+                job_id=job_id,
+                model_name="user",
+                label="no_fit",
+                confidence=1.0,
+                reason="Hidden by user",
             )
+            session.add(verdict)
         else:
+            old_reason = verdict.reason
             verdict.label = "no_fit"
             verdict.confidence = 1.0
             verdict.reason = "Hidden by user"
             verdict.model_name = "user"
         session.commit()
+        job_title, company = job.title, job.company
     add_feedback(job_id, "hide")
+    backboard.add_memory(
+        f"User hid job {job_id} ({job_title} at {company}). Reason: {old_reason}"
+    )
     return Response(content="")
 
 
 @router.post("/override/{job_id}")
 def override(job_id: int):
     with Session(engine) as session:
+        job = session.get(Job, job_id)
         verdict = session.exec(select(Verdict).where(Verdict.job_id == job_id)).first()
+        old_reason = "no prior verdict"
         if verdict is None:
-            session.add(
-                Verdict(
-                    job_id=job_id,
-                    model_name="user",
-                    label="fit",
-                    confidence=1.0,
-                    reason="Overridden by user",
-                )
+            verdict = Verdict(
+                job_id=job_id,
+                model_name="user",
+                label="fit",
+                confidence=1.0,
+                reason="Overridden by user",
             )
+            session.add(verdict)
         else:
+            old_reason = verdict.reason
             verdict.label = "fit"
             verdict.confidence = 1.0
             verdict.reason = "Overridden by user"
             verdict.model_name = "user"
         session.commit()
+        job_title, company = job.title, job.company
     add_feedback(job_id, "override")
+    backboard.add_memory(
+        f"User overrode job {job_id} ({job_title} at {company}) to fit. Previous reason: {old_reason}"
+    )
     return Response(content="")
