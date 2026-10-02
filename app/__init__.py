@@ -1,1 +1,1 @@
-"""Five Good Ones — a job-fit filter that only surfaces high-fit roles."""
+"""Duster — an interview post-mortem coach for one job hunter."""

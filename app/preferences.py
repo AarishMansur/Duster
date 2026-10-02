@@ -1,18 +1,21 @@
-import json
-import re
+"""Read and write the single user's preference rows."""
+
 from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
-from .config import settings
 from .db import engine
 from .models import Preference
 
 DEFAULTS: dict[str, str] = {
-    "resume_text": "",
-    "domain_definition": "",
-    "weekly_budget": "5",
-    "exclude_keywords": "",
+    "target_role": "backend engineer",
+    "domain": "product infrastructure",
+    "weak_areas": "no_metrics, rambling",
+    "backboard_assistant_id": "",
+    "backboard_thread_id": "",
+    "backboard_summary": "",
+    "drill_queue": "[]",
+    "drill_index": "0",
 }
 
 
@@ -32,30 +35,5 @@ def set_pref(key: str, value: str) -> None:
         else:
             pref.value = value
             pref.updated_at = datetime.now(timezone.utc)
+            session.add(pref)
         session.commit()
-
-
-def get_budget() -> int:
-    try:
-        return max(0, int(get_prefs()["weekly_budget"]))
-    except ValueError:
-        return 5
-
-
-def add_feedback(job_id: int, action: str) -> None:
-    feedback = json.loads(get_prefs().get("feedback") or "[]")
-    feedback.append(
-        {"job_id": job_id, "action": action, "ts": datetime.now(timezone.utc).isoformat()}
-    )
-    set_pref("feedback", json.dumps(feedback))
-
-
-def get_classifier_name() -> str:
-    return get_prefs().get("classifier") or settings.classifier
-
-
-def extract_excludes_from_memories(memories: list[str]) -> list[str]:
-    keywords = []
-    for m in memories:
-        keywords.extend(re.findall(r"exclude keyword '([^']+)'", m))
-    return keywords
